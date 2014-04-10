@@ -15,6 +15,44 @@ versus cardinal numbers, and more.
 Geocoder::US 2.0 is shipped with a free US ZIP code data set, compiled from
 public domain sources.
 
+== Spellfix Update  *********
+
+This fork includes several modifications to improve address matching.  First, the 
+it was found that in identifying places names, the full address was included in the
+match.  This meant that is the street name was similar to a city, that entry might
+recieve a higher score, and thus the wrong location city would be selected.  To 
+correct this, the city lookup is not done in reverse order, adding one work at a 
+time until a strong match is found.  So and address like "10 Columbia St Silver Spring"
+Would look first for a "Spring" match, then a "Silver Spring" then "Silver Spring St".
+Since "Silver Spring" is a valid city in MD, this should provide the strongest match.
+
+The second major error that was fixed involved zip code searches.  The original version
+would search in the specified zip code, however, if not found, it would search in all
+zip codes matching the first three digits of the zip code.   This is unsatisphactory
+since adjacanet zip codes were often being omitted in the search.  From time to time
+zip codes can be changed, so we needed a method to address this problem.  Since it is likely
+that location is nominally correct, we decided to identify the county of the original
+zip code, and then search all zip codes in that county for the supplied city.  This
+did a much better job finding locations were the zip code was probably correct at
+some time in the past. 
+
+The last major problem involved spelling errors.  The metaphone technique employed
+does not do an adequate job even handing valid omissions like "St John Street" versus
+"Saint John Street"  After looking at various options, it was discovered taht sqlite
+has a spellfix library well suited for address spelling lookups where there are limmited
+errors.  This helped identify many streets were which formerly unfound in searches. While
+this addition proved very helpful, there are still some areas where the match is
+incorrect.  These might be addresses at a future time, but overall the spellfix addition
+handled a large number of addresses formerly poorly matched.  I have included a section
+at the bottom of this document describing how to build and install this library.  Note, 
+this version of the project loads the spellfix library near the top of the database.rb 
+file.  So it will not work without this addition.
+
+
+Finally, some score thresholds were added to force additinal searches if weak 
+candidates were returned.
+
+
 == Synopsis
 
   >> require 'geocoder/us'
@@ -193,6 +231,78 @@ database built, you can run the test harness like so:
   $ ruby tests/run.rb /opt/tiger/geocoder.db
 
 The full test suite may take 30 or so seconds to run completely.
+
+== Sqlite Spellfix Install
+
+(Note, paths are optional, but provided to help prevent errors.)
+
+Create an sqlite directory in /opt.
+
+  cd /opt/sqlite:
+
+Download source code into this directory. (There is likely a newer version of the source code, but testing was done this this version)
+
+  sudo wget http://www.sqlite.org/2013/sqlite-src-3071700.zip
+
+  sudo unzip sqlite-src-3071700.zip
+
+  cd sqlite-src-3071700
+
+  cd ext
+
+  cd misc
+
+
+The spellfix file will not compile at it stands in this version.  Therefore we need to make several modifications to the C code.
+
+Note worthy links:
+(http://www.sqlite.org/c3ref/c_abort_rollback.html for Extended result codes: SQLITE_CONSTRAINT_NOTNULL)
+(http://sqlite.1065341.n5.nabble.com/SQLite-version-3-7-16-td67776.html see middle of page for missing init function)
+
+
+edit spellfix, and add at top:
+
+    #define SQLITE_CONSTRAINT_NOTNULL      (SQLITE_CONSTRAINT | (5<<8))
+
+    static int spellfix1Register(sqlite3 *db); // need prototype for this function since it is at the bottom.
+
+    int sqlite3_extension_init(sqlite3 *db, char ** pxErrMsg, const sqlite3_api_routines *pApi)
+    { SQLITE_EXTENSION_INIT2(pApi); return spellfix1Register(db); }
+
+    int sqlite3_stricmp(const char *zLeft, const char *zRight)
+    { return strcasecmp(zLeft, zRight); }
+
+
+Note worthy links:
+(to compilte http://stackoverflow.com/questions/18421465/compiling-spellfix-for-sqlite3)
+
+Execute this command to compile library. ( Note, we leave .so off the library since we need to load this in sqlite but sqlite treats "." as a special character.)
+
+    gcc -shared -fPIC -Wall -I/opt/sqlite/sqlite-src-3071700/ spellfix.c -o spellfix1
+
+
+Now start the sqlite binary and open the database where all the data was loaded. 
+
+    sqlite3 geocoder.db
+
+From the sqlite commandline, run the following to load the new spellfix1 library. (Note, fix path is necessary.)
+
+   .load /opt/sqlite/sqlite-src-3071700/spellfix1  (or path to spellfix1)
+
+
+Note worthy links:
+(http://www.sqlite.org/spellfix1.html spellfix documentation)
+
+  CREATE VIRTUAL TABLE feature_spellfix1 USING spellfix1;
+
+(if this produces and error 'unable to open database', then be sure the database has write permissions, and the directory also must be writable).
+
+  INSERT INTO feature_spellfix1(word, langid) SELECT street, zip FROM feature;  
+
+(using langid as the zipcode field)
+
+
+Note, the file database.rb contains the path to the spellfix library, so if this is different on your system, the ruby file containing this path needs updating.
 
 == License
 
