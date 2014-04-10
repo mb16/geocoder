@@ -260,7 +260,7 @@ Note worthy links:
 (http://sqlite.1065341.n5.nabble.com/SQLite-version-3-7-16-td67776.html see middle of page for missing init function)
 
 
-edit spellfix, and add at top:
+edit spellfix.c, and add at top:
 
     #define SQLITE_CONSTRAINT_NOTNULL      (SQLITE_CONSTRAINT | (5<<8))
 
